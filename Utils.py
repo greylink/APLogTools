@@ -1,6 +1,8 @@
 import os
 import platform
 import shutil
+import tkinter as tk
+
 
 def get_notepadpp_info():
     if platform.system() != 'Windows':
@@ -24,3 +26,15 @@ def get_notepadpp_info():
     # 如果都没有找到，返回False和None
     return False, None
 
+class Toast:
+    def __init__(self, root, text, duration=2000):
+        self.root = root
+        self.text = text
+        self.duration = duration
+        self.label = tk.Label(root, text=text)
+        self.label.pack()
+        self.label.place(relx=0.5, rely=0.9, anchor='s')
+        self.root.after(self.duration, self.close)
+
+    def close(self):
+        self.label.destroy()

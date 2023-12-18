@@ -1,9 +1,12 @@
 import os
 import tkinter as tk
-from tkinter import simpledialog, filedialog
+from tkinter import simpledialog, filedialog, messagebox
 from tkinterdnd2 import TkinterDnD, DND_FILES
 from configparser import ConfigParser
+from tkinter import Scrollbar
+import threading
 import LogParser
+from Utils import Toast
 from rules_config import CONFIG_FILE
 
 
@@ -25,16 +28,19 @@ class ConfigEditor:
                 self.config['settings'] = {'last_selected_folder': ''}
 
         # 创建按钮
-        self.button_frame = tk.Frame(master)
-        self.button_frame.pack(pady=10)
-
         self.buttons = {}
         self.current_rule_name = None # Initialize current_rule_name
+        # 创建带有滚动条的Canvas
+        self.canvas = tk.Canvas(master)
+        self.button_frame = tk.Frame(master)
+        self.canvas.create_window((0, 0), window=self.button_frame, anchor="nw")
 
         for rule_name in self.config['log_rules']:
             button = tk.Button(self.button_frame, text=rule_name, command=lambda name=rule_name: self.load_config_by_name(name))
-            button.pack(side=tk.LEFT, padx=5)
+            button.bind("<Button-3>", lambda event, name=rule_name: self.show_context_menu(event, name))  # Bind right-click event
             self.buttons[rule_name] = button  # Store the button reference
+
+        self.canvas.pack(pady=10)
 
         # 新建规则
         new_rule_button = tk.Button(master, text="新建规则", command=self.create_new_rule)
@@ -52,12 +58,12 @@ class ConfigEditor:
         # 获取最后一次选择的文件夹
         self.last_selected_folder = self.config.get('settings', 'last_selected_folder', fallback='')
         # Add a button for file selection
-        select_file_button = tk.Button(master, text="Select File", command=self.select_file, width=28, height=4)
+        select_file_button = tk.Button(master, text="Select File", command=self.select_file, width=14, height=2)
         select_file_button.pack(pady=10)
 
 
         # 创建drop
-        self.file_label = tk.Label(self.master, text="Drop Files Here(no work)", relief=tk.SUNKEN, width=30, height=2)
+        self.file_label = tk.Label(self.master, text="Drop Files Here(no work)", relief=tk.SUNKEN, width=30, height=3)
         self.file_label.pack(pady=20)
         # 启用拖放功能
         self.file_label.drop_target_register(DND_FILES)
@@ -139,10 +145,20 @@ class ConfigEditor:
         print(f"文件路径: {file_path}")
         if self.current_rule_name is not None:
             print("handle_filecurrent_rule_name = " + self.current_rule_name)
-            LogParser.process_logs(file_path, self.current_rule_name)
+            # messagebox.showinfo("文件处理开始", f"正在处理文件: {file_path}")
+
+            threading.Thread(target=self.process_logs_in_background, args=(file_path,)).start()
+
         else:
             print("未选择规则")
-
+            
+    def process_logs_in_background(self, file_path):
+        toast = Toast(self.master, "文件处理...")
+        try:
+            LogParser.process_logs(file_path, self.current_rule_name)
+        finally:
+            toast.close
+            
     def create_new_rule(self):
         # 使用 tkinter.simpledialog 获取新规则的名称和配置
         new_rule_name = tk.simpledialog.askstring("新建规则", "请输入新规则的名称：")
@@ -166,10 +182,44 @@ class ConfigEditor:
             button.destroy()
 
         # 创建新按钮
+        row_count = 0
+        col_count = 0
+        max_cols_per_row = 5
+
         for rule_name in self.config['log_rules']:
             button = tk.Button(self.button_frame, text=rule_name, command=lambda name=rule_name: self.load_config_by_name(name))
-            button.pack(side=tk.LEFT, padx=5)
+            button.grid(row=row_count, column=col_count, padx=5, pady=5)
             self.buttons[rule_name] = button
+
+            col_count += 1
+            if col_count >= max_cols_per_row:
+                col_count = 0
+                row_count += 1
+
+        # 更新Canvas的大小
+        self.canvas.update_idletasks()
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
+    def show_context_menu(self, event, rule_name):
+        print("on show_context_menu")
+        menu = tk.Menu(self.master, tearoff=0)
+        menu.add_command(label="删除", command=lambda name=rule_name: self.delete_rule(name))
+        menu.post(event.x_root, event.y_root)
+
+    def delete_rule(self, rule_name):
+        # 从界面上删除按钮
+        button = self.buttons.pop(rule_name, None)
+        if button:
+            button.destroy()
+
+        # 从配置文件中删除规则
+        if rule_name in self.config['log_rules']:
+            del self.config['log_rules'][rule_name]
+            # 保存更新后的配置到文件
+            with open(CONFIG_FILE, 'w') as configfile:
+                self.config.write(configfile)
+                configfile.flush()
+
 
     def create_default_config(self):
         default_config = {
